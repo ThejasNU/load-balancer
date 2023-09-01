@@ -1,4 +1,4 @@
-package roundRobin
+package main
 
 import (
 	"log"
@@ -17,7 +17,7 @@ type LoadBalancer struct {
 }
 
 type Server struct {
-	Url    string
+	Url     string
 	IsAlive bool
 	mu      sync.RWMutex
 }
@@ -52,7 +52,7 @@ func (lb *LoadBalancer) GetNextServer() *Server {
 		nextIndex = (nextIndex + 1) % numServers
 		count++
 	}
-
+	lb.index=nextIndex
 	if count == numServers {
 		return nil
 	} else {
@@ -60,24 +60,24 @@ func (lb *LoadBalancer) GetNextServer() *Server {
 	}
 }
 
-//############ HEALTH CHECKER #######################################################
-func (lb *LoadBalancer)checkHealth(){
-	t:=time.NewTicker(time.Minute*1)
-	
-	for{
-		select{
+// ############ HEALTH CHECKER #######################################################
+func (lb *LoadBalancer) checkHealth() {
+	t := time.NewTicker(time.Minute * 1)
+
+	for {
+		select {
 		case <-t.C:
-			for i:=0;i<len(lb.Servers);i++{
-				var server *Server=&lb.Servers[i]
+			for i := 0; i < len(lb.Servers); i++ {
+				var server *Server = &lb.Servers[i]
 				//make sure that server details are not being updated
 				server.mu.RLock()
-				pingUrl,err:=url.Parse(server.Url)
-				if err!=nil{
+				pingUrl, err := url.Parse(server.Url)
+				if err != nil {
 					log.Fatal(err.Error())
 				}
 				server.mu.RUnlock()
 				//call helper which pings the url
-				isAlive:=checkStatus(pingUrl)
+				isAlive := checkStatus(pingUrl)
 				//setAliveStatus has lock implementation inside it so need of lock here
 				server.SetAliveStatus(isAlive)
 			}
@@ -86,29 +86,47 @@ func (lb *LoadBalancer)checkHealth(){
 }
 
 func checkStatus(url *url.URL) bool {
-	conn,err:=net.DialTimeout("tcp",url.Host,time.Second*10)
+	conn, err := net.DialTimeout("tcp", url.Host, time.Second*10)
 	defer conn.Close()
-	
-	if err!=nil{
+
+	if err != nil {
 		return false
-		} else {
-			return true
-		}
+	} else {
+		return true
 	}
-	
-//############ MAIN FUNCTION #######################################################
-func main(){
+}
+
+// ############ MAIN FUNCTION #######################################################
+func main() {
 	//create dummy servers and add
-	var lb LoadBalancer=LoadBalancer{
+	var lb LoadBalancer = LoadBalancer{
 		Port: "8080",
-		Servers: []Server{},
+		Servers: []Server{
+			{
+				Url:     "htttp://localhost:8081/",
+				IsAlive: true,
+			},
+			{
+				Url:     "htttp://localhost:8082/",
+				IsAlive: true,
+			},
+			{
+				Url:     "htttp://localhost:8083/",
+				IsAlive: false,
+			},
+			{
+				Url:     "http://localhost:8084/",
+				IsAlive: true,
+			},
+		},
+		index: -1,
 	}
 
 	//execute health checker on different go routine
 	go lb.checkHealth()
 
-	for i:=0;i<5;i++{
-		server:=lb.GetNextServer()
+	for i := 0; i < 5; i++ {
+		server := lb.GetNextServer()
 		println(server.Url)
 	}
 }
