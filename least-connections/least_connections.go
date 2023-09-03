@@ -1,4 +1,4 @@
-package main
+package leastconnections
 
 import (
 	"log"
@@ -13,13 +13,14 @@ type LoadBalancer struct {
 	Port    string
 	Servers []Server
 	mu      sync.Mutex
-	index   int
 }
 
 type Server struct {
 	Url     string
 	IsAlive bool
 	mu      sync.RWMutex
+	numConnections int
+
 }
 
 // ############ HELPERS #######################################################
@@ -38,26 +39,49 @@ func (server *Server) SetAliveStatus(currentStatus bool) {
 	server.IsAlive = currentStatus
 }
 
+func (server *Server) GetNumConnections() int {
+	server.mu.RLock()
+	defer server.mu.RUnlock()
+
+	return server.numConnections
+}
+
+func (server *Server) SetNumConnections(num int){
+	server.mu.Lock()
+	defer server.mu.Unlock()
+
+	server.numConnections=num
+}
+
 // ############ LOAD BALANCER MAIN FUNCTION #######################################################
 func (lb *LoadBalancer) GetNextServer() *Server {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
 	numServers := len(lb.Servers)
-	nextIndex := (lb.index + 1) % numServers
 
-	//find next server which is alive, if all servers are dead return nil
-	var count int = 0
-	for lb.Servers[nextIndex].GetAliveStatus() == false && count < numServers {
-		nextIndex = (nextIndex + 1) % numServers
-		count++
+	var serverToBeReturned *Server=nil
+	var numConnections=100000000000
+	for i:=0;i<numServers;i++{
+		var curServer *Server=&lb.Servers[i]
+
+		if !curServer.GetAliveStatus(){
+			continue
+		}
+
+		curServerNumConnections:=curServer.numConnections
+
+		if curServerNumConnections<numConnections{
+			serverToBeReturned=curServer
+			numConnections=curServerNumConnections
+		}
 	}
-	lb.index=nextIndex
-	if count == numServers {
-		return nil
-	} else {
-		return &lb.Servers[nextIndex]
+
+	if serverToBeReturned!=nil{
+		serverToBeReturned.SetNumConnections(numConnections+1)
 	}
+
+	return serverToBeReturned
 }
 
 // ############ HEALTH CHECKER #######################################################
@@ -97,7 +121,7 @@ func checkStatus(url *url.URL) bool {
 }
 
 // ############ MAIN FUNCTION #######################################################
-func main() {
+func LeastconnectionsMain() {
 	//create dummy servers and add
 	var lb LoadBalancer = LoadBalancer{
 		Port: "8080",
@@ -105,27 +129,30 @@ func main() {
 			{
 				Url:     "htttp://localhost:8081/",
 				IsAlive: true,
+				numConnections: 0,
 			},
 			{
 				Url:     "htttp://localhost:8082/",
 				IsAlive: true,
+				numConnections: 2,
 			},
 			{
 				Url:     "htttp://localhost:8083/",
-				IsAlive: false,
+				IsAlive: true,
+				numConnections: 1,
 			},
 			{
 				Url:     "http://localhost:8084/",
 				IsAlive: true,
+				numConnections: 4,
 			},
 		},
-		index: -1,
 	}
 
 	//execute health checker on different go routine
 	go lb.checkHealth()
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		server := lb.GetNextServer()
 		println(server.Url)
 	}
